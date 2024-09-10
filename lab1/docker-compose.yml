@@ -1,0 +1,11 @@
+services:
+  client:
+    build: ./client
+    depends_on:
+      - server
+  server:
+    build: ./server
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./data:/app/data
