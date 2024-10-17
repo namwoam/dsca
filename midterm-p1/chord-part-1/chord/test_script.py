@@ -16,5 +16,5 @@ client_1.call("create")
 client_2.call("join", client_1.call("get_info"))
 
 # test the functionality after all nodes have joined the Chord ring
-# print(client_1.call("find_successor", 123))
-# print(client_2.call("find_successor", 123))
+print(client_1.call("find_successor", 123))
+print(client_2.call("find_successor", 123))
