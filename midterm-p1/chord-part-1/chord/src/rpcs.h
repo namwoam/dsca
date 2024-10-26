@@ -3,6 +3,9 @@
 
 #include "chord.h"
 #include "rpc/client.h"
+#include <iostream>
+#include <vector>
+
 #define MOD 1024
 #define FINGER_TABLE_SIZE 10
 
@@ -25,33 +28,31 @@ void check_predecessor();
 
 bool all_in_ring_clockwise_order(uint64_t prev, uint64_t middle, uint64_t next, bool back_equal)
 {
-  if (prev < middle && middle < next)
+  prev %= MOD;
+  middle %= MOD;
+  next %= MOD;
+
+  // Check for exact matches if back_equal is true
+  if (back_equal && (prev == middle || middle == next || prev == next))
   {
     return true;
   }
-  if (middle < next && next < prev)
+
+  // Case 1: No wraparound (simple clockwise order)
+  if (prev < next)
   {
-    return true;
+    return prev < middle && middle < next;
   }
-  if (next < prev && prev < middle)
-  {
-    return true;
-  }
-  if (back_equal)
-  {
-    if (prev == middle || prev == next || middle == next)
-    {
-      return true;
-    }
-  }
-  return false;
+
+  // Case 2: Wraparound (when next < prev, the range crosses the zero boundary)
+  return (middle > prev || middle < next);
 }
 
 void update_finger_table()
 {
   for (int i = 0; i < finger_table.size(); i++)
   {
-    uint64_t start = self.id + (1 << i);
+    uint64_t start = (self.id + (1 << i)) % MOD; // Modulo to ensure start is within the ring
     finger_table.at(i) = find_successor(start);
   }
 }
@@ -80,7 +81,7 @@ Node closest_preceding_node(uint64_t id)
 
 void create()
 {
-  // point the predecessor to nil and the successor to itself
+  // Point the predecessor to nil and the successor to itself
   predecessor.ip = "";
   successor = self;
 }
@@ -99,8 +100,7 @@ Node get_predecessor()
 
 Node find_successor(uint64_t id)
 {
-  Node result;
-  // TODO: implement your `find_successor` RPC
+  // Handle successor lookup with modular arithmetic and error handling
   if (all_in_ring_clockwise_order(self.id % MOD, id % MOD, successor.id % MOD, true))
   {
     return successor;
@@ -111,13 +111,13 @@ Node find_successor(uint64_t id)
     rpc::client client(n.ip, n.port);
     try
     {
-      client.call("get_info").as<Node>();
+      client.set_timeout(1000); // Set an appropriate timeout
+      return client.call("find_successor", id).as<Node>();
     }
     catch (std::exception &e)
     {
-      return self;
+      return self; // Fall back to self if RPC fails
     }
-    return client.call("find_successor", id).as<Node>();
   }
 }
 
@@ -127,22 +127,25 @@ void stabilize()
   {
     return;
   }
+
   rpc::client client(successor.ip, successor.port);
   Node x;
   try
   {
-    client.call("get_info").as<Node>();
+    client.call("get_info").as<Node>(); // Ensure successor is reachable
   }
   catch (std::exception &e)
   {
-    successor.ip = "";
+    successor.ip = ""; // Mark successor as invalid
     return;
   }
+
   x = client.call("get_predecessor").as<Node>();
   if (x.ip != "" && all_in_ring_clockwise_order(self.id % MOD, x.id % MOD, successor.id % MOD))
   {
     successor = x;
   }
+
   rpc::client new_client(successor.ip, successor.port);
   new_client.call("notify", self);
 }
@@ -160,11 +163,11 @@ void check_predecessor()
   try
   {
     rpc::client client(predecessor.ip, predecessor.port);
-    Node n = client.call("get_info").as<Node>();
+    client.call("get_info").as<Node>(); // Ensure predecessor is reachable
   }
   catch (std::exception &e)
   {
-    predecessor.ip = "";
+    predecessor.ip = ""; // Mark predecessor as invalid if unreachable
   }
 }
 
