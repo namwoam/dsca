@@ -4,12 +4,26 @@
 #include "chord.h"
 #include "rpc/client.h"
 #define MOD 1024
+#define FINGER_TABLE_SIZE 10
 
 Node self, successor, predecessor;
 
 Node get_info() { return self; } // Do not modify this line.
 
-bool all_in_ring_clockwise_order(uint64_t prev, uint64_t middle, uint64_t next, bool back_equal = false)
+std::vector<Node> finger_table(FINGER_TABLE_SIZE);
+
+bool all_in_ring_clockwise_order(uint64_t prev, uint64_t middle, uint64_t next, bool back_equal = false);
+void update_finger_table();
+Node closest_preceding_node(uint64_t id);
+void create();
+void join(Node n);
+Node get_predecessor();
+Node find_successor(uint64_t id);
+void stabilize();
+void notify(Node n);
+void check_predecessor();
+
+bool all_in_ring_clockwise_order(uint64_t prev, uint64_t middle, uint64_t next, bool back_equal)
 {
   if (prev < middle && middle < next)
   {
@@ -33,6 +47,37 @@ bool all_in_ring_clockwise_order(uint64_t prev, uint64_t middle, uint64_t next, 
   return false;
 }
 
+void update_finger_table()
+{
+  for (int i = 0; i < finger_table.size(); i++)
+  {
+    uint64_t start = self.id + (1 << i);
+    finger_table.at(i) = find_successor(start);
+  }
+}
+
+void show_status()
+{
+  std::cout << "Node " << self.id << " has successor " << successor.id << " and predecessor " << predecessor.id << std::endl;
+  std::cout << "Finger table of node " << self.id << ":" << std::endl;
+  for (int i = 0; i < finger_table.size(); i++)
+  {
+    std::cout << "Finger " << i << ": " << finger_table.at(i).id << std::endl;
+  }
+}
+
+Node closest_preceding_node(uint64_t id)
+{
+  for (int i = finger_table.size() - 1; i >= 0; i--)
+  {
+    if (all_in_ring_clockwise_order(self.id % MOD, finger_table.at(i).id % MOD, id % MOD))
+    {
+      return finger_table.at(i);
+    }
+  }
+  return self;
+}
+
 void create()
 {
   // point the predecessor to nil and the successor to itself
@@ -54,7 +99,7 @@ Node get_predecessor()
 
 Node find_successor(uint64_t id)
 {
-  std::cout << "find_successor: " << id << "from node: " << self.id << std::endl;
+  Node result;
   // TODO: implement your `find_successor` RPC
   if (all_in_ring_clockwise_order(self.id % MOD, id % MOD, successor.id % MOD, true))
   {
@@ -62,7 +107,16 @@ Node find_successor(uint64_t id)
   }
   else
   {
-    rpc::client client(successor.ip, successor.port);
+    Node n = closest_preceding_node(id);
+    rpc::client client(n.ip, n.port);
+    try
+    {
+      client.call("get_info").as<Node>();
+    }
+    catch (std::exception &e)
+    {
+      return self;
+    }
     return client.call("find_successor", id).as<Node>();
   }
 }
@@ -74,7 +128,17 @@ void stabilize()
     return;
   }
   rpc::client client(successor.ip, successor.port);
-  Node x = client.call("get_predecessor").as<Node>();
+  Node x;
+  try
+  {
+    client.call("get_info").as<Node>();
+  }
+  catch (std::exception &e)
+  {
+    successor.ip = "";
+    return;
+  }
+  x = client.call("get_predecessor").as<Node>();
   if (x.ip != "" && all_in_ring_clockwise_order(self.id % MOD, x.id % MOD, successor.id % MOD))
   {
     successor = x;
@@ -118,6 +182,8 @@ void register_periodics()
 {
   add_periodic(check_predecessor);
   add_periodic(stabilize);
+  add_periodic(update_finger_table);
+  add_periodic(show_status);
 }
 
 #endif /* RPCS_H */
